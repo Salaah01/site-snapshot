@@ -17,3 +17,6 @@ Answer the on screen questions to generate your shell script.
 
 ## Be Responsible
 This script has the capability to scrape an entire site. Before running the outputted script, make sure that you have the correct permissions to do so as this likely may be violating the site's terms and conditions.
+
+## Credit
+Most of the credit should go to this [gist](https://gist.github.com/mikecrittenden/fe02c59fed1aeebd0a9697cf7e9f5c0c) which had a great example of how to use wget to download an entire site.
