@@ -45,7 +45,7 @@ fi
 run_script="$ROOT/run.sh"
 
 if [ -f "$run_script" ]; then
-  read -p "File already exists. Overwrite? [Y/n] " overwrite
+  read -p "File (run.sh) already exists. Overwrite? [Y/n] " overwrite
   validate_y_no "$overwrite"
   if [ "${overwrite,,}" == "n" ]; then
     echo "Exiting..."
@@ -53,13 +53,14 @@ if [ -f "$run_script" ]; then
   fi
 fi
 
-echo "!#/usr/bin/bash" >$run_script
+echo "#!/usr/bin/bash" >$run_script
 echo "cd $ROOT" >>$run_script
 echo "mkdir -p output/tmp" >>$run_script
 echo "cd output/tmp" >>$run_script
+echo "rm -rf *" >> $run_script
 
 # Building the wget command
-wget_command="wget --adjust-extension domains ${domain} --no-parent "
+wget_command="wget --adjust-extension --domains ${domain} --no-parent "
 if [ $recursive == 'y' ]; then
   wget_command="${wget_command} --recursive "
 fi
@@ -74,6 +75,10 @@ if [ $convert_links == 'y' ]; then
 fi
 
 echo "${wget_command} ${domain}" >>$run_script
+chmod +x $run_script
+
+# Zip and compress the output
+echo "tar -zcf ${filename} ${domain}" >>$run_script 
 
 echo "Local/cloud backup?"
 echo "Supported cloud platforms: AWS, Azure, Google Cloud"
@@ -87,9 +92,59 @@ if [ "$backup_type" != "local" ] && [ "$backup_type" != "cloud" ]; then
 fi
 
 if [ "$backup_type" == "local" ]; then
-  read -p 'Local backup directory: ' backup_dir
-else
-  read -p 'Cloud backup platform: ' cloud_platform
-  read -p 'Cloud backup bucket: ' cloud_bucket
-  read -p 'Cloud backup directory: ' cloud_dir
+  # At this point, the contents of the tmp directory is the actual local
+  # download, move that to the output directory.
+  echo "mv ${filename} ../." >>$run_script
+  echo "cd .." >>$run_script
+  echo "rm -rf tmp" >>$run_script
+  exit 0
 fi
+
+# Cloud backup
+# Collect cloud storage details.
+read -p 'Cloud backup platform [aws, azure, google]: ' cloud_platform
+if [ "${cloud_platform,,}" != "aws" ] && [ "${cloud_platform,,}" != "azure" ] && [ "${cloud_platform,,}" != "google" ]; then
+  echo "Invalid input. Please enter aws, azure, or google."
+  exit 1
+fi
+if [ "${cloud_platform,,}" == 'azure' ]; then
+  read -p 'Cloud account name: ' cloud_bucket
+else 
+  read -p 'Cloud backup bucket: ' cloud_bucket
+fi
+read -p 'Cloud backup directory: ' cloud_dir
+
+if [ -z "${cloud_dir}" ]; then
+  cloud_filepath="${filename}"
+else
+  cloud_filepath="${cloud_dir}/${filename}"
+fi
+
+
+# Update script to upload to cloud
+case "${cloud_platform,,}" in
+  aws)
+    echo "aws s3 cp ${filename} s3://${cloud_bucket}/${cloud_filepath}" >>$run_script
+    ;;
+  azure)
+    echo "az storage blob upload-batch --destination ${cloud_filepath} --source ${filename} --account-name ${cloud_bucket}" >>$run_script
+    ;;
+  google)
+    echo "gsutil cp ${filename} gs://${cloud_bucket}/${cloud_filepath}" >>$run_script
+    ;;
+  *)
+    echo "Invalid input. Please enter aws, azure, or google."
+    exit 1
+    ;;
+esac
+
+# Check if the backup was successful, if it was move the tmp directory,
+# otherwise, retain the tmp directory and exit.
+echo 'if [ $? -ne 0 ]; then' >>$run_script
+echo "  echo 'Backup failed. Local backup will be retained in output/tmp.'" >>$run_script
+echo "  exit 1" >>$run_script
+echo "fi" >>$run_script
+
+# If the backup passes, then we can safely remove the tmp directory.
+echo "cd ${ROOT}" >>$run_script
+echo "rm -rf output/tmp" >>$run_script
